@@ -14,10 +14,12 @@ import numpy as np
 import plotly.graph_objects as go
 
 from . import geometry as G
-from .figure import GREY, HITC, HPCC, PVC, SHOWER, SHOWER_SCALE, SVC, VDC, logo_image
+from ._flow import objects, unit_direction
+from .figure import GREY, HITC, HPCC, JETC, PVC, SHOWER, SHOWER_SCALE, SVC, VDC, logo_image
 from .read import Event
 
 ZLIM = 3000.0
+QUILL = 0.9  # largest ordinary quill, relative to the unit-sphere radius
 AXIS = dict(backgroundcolor="#fbfbfa", gridcolor="#e3e5e8", zerolinecolor="#cfd3d8",
             tickfont=dict(size=10), title=dict(font=dict(size=12)))
 
@@ -219,5 +221,100 @@ def build3d(
             camera=dict(eye=dict(x=1.45, y=1.05, z=0.85)),
         ),
         paper_bgcolor="white",
+    )
+    return fig
+
+
+def build_flow3d(
+    e: Event,
+    *,
+    groups: dict | None = None,
+    hide: dict | None = None,
+    jets: bool = True,
+    title: str = "",
+    note: str = "",
+    width: int = 1250,
+    height: int = 900,
+) -> go.Figure:
+    """Poynting-style sphere, with quills scaled by the square root of magnitude.
+
+    Magnitude means E for clusters/jets and |p| for charged tracks, in GeV.
+    All objects share one per-event normalization; jets are emphasized by a factor
+    of 1.3. Equal axis ranges preserve the spherical geometry while rotating it.
+    """
+    groups, hide = groups or {}, hide or {}
+    roles = getattr(e, "roles", {}) or {}
+    drawn, reference = objects(e, hide, jets)
+    fig = go.Figure()
+    seen = set()
+
+    def once(group):
+        first = group not in seen
+        seen.add(group)
+        return first
+
+    phi = np.linspace(0, 2 * np.pi, 49)
+    theta = np.linspace(0, np.pi, 25)
+    fig.add_trace(go.Surface(
+        # Lists also work with the site's Plotly.js 2.x (newer plotly.py can
+        # encode numpy arrays using a binary JSON format introduced in JS 3.x).
+        x=np.outer(np.cos(phi), np.sin(theta)).tolist(),
+        y=np.outer(np.sin(phi), np.sin(theta)).tolist(),
+        z=np.outer(np.ones_like(phi), np.cos(theta)).tolist(),
+        showscale=False, opacity=0.12, colorscale=[[0, VDC], [1, VDC]], hoverinfo="skip",
+        name="unit sphere", showlegend=True, legendgroup="sphere", meta={"role": "", "collection": ""},
+    ))
+
+    for obj in sorted(drawn, key=lambda obj: obj.role == "tracks" and obj.index in groups):
+        scale = 1.0
+        if obj.role == "tracks":
+            label, color = groups.get(obj.index, ("charged tracks", GREY))
+            highlighted = obj.index in groups
+            group = f"g:{label}" if highlighted else "trkother"
+            line_width, marker_size = (5, 4) if highlighted else (2, 3)
+        elif obj.role == "em_clusters":
+            label, color, group = "EM clusters (quill ∝ √E)", SHOWER, "em"
+            line_width, marker_size = 3, 3
+        else:
+            label, color, group = "jets (quill ∝ √E)", JETC, "jet"
+            line_width, marker_size, scale = 8, 7, 1.3
+        start = obj.direction
+        end = (1.0 + scale * QUILL * np.sqrt(obj.magnitude / reference)) * obj.direction
+        fig.add_trace(go.Scatter3d(
+            x=[start[0], end[0]], y=[start[1], end[1]], z=[start[2], end[2]], mode="lines+markers",
+            line=dict(color=color, width=line_width), marker=dict(size=[0, marker_size], color=color),
+            name=label, legendgroup=group, showlegend=once(group), hovertemplate=obj.hover + "<extra></extra>",
+            meta={"role": obj.role, "collection": roles.get(obj.role, "")},
+        ))
+
+    thrust = unit_direction(e.thrust)
+    if thrust is not None:
+        start, end = -1.35 * thrust, 1.35 * thrust
+        fig.add_trace(go.Scatter3d(
+            x=[start[0], end[0]], y=[start[1], end[1]], z=[start[2], end[2]], mode="lines",
+            line=dict(color=PVC, width=4, dash="dash"), hovertemplate="thrust axis<extra></extra>",
+            name="thrust axis", legendgroup="thrust", showlegend=True, meta={"role": "", "collection": ""},
+        ))
+    fig.add_trace(go.Scatter3d(
+        x=[0, 0], y=[0, 0], z=[-1.35, 1.35], mode="lines", line=dict(color="#c9ced6", width=2),
+        hoverinfo="skip", name="beam axis (z)", legendgroup="beam", showlegend=True,
+        meta={"role": "", "collection": ""},
+    ))
+
+    fig.update_layout(
+        meta=dict(run=e.run, event=e.event, entry=e.entry, source=e.path.split("/")[-1],
+                  n_charged=e.n_charged, n_neutral=e.n_neutral, b_field=e.b_field,
+                  btag=e.btag_event, title=title, note=note, view="flow3d"),
+        template=_template3d(), showlegend=True, width=width, height=height, font=dict(size=12),
+        images=[logo_image(x=0.995, size=0.085)],
+        legend=dict(orientation="h", yanchor="top", y=-0.02, xanchor="center", x=0.5, font=dict(size=12)),
+        margin=dict(l=0, r=0, t=66, b=60),
+        scene=dict(
+            aspectmode="cube",
+            xaxis=dict(**AXIS, title_text="x", range=[-2.3, 2.3]),
+            yaxis=dict(**AXIS, title_text="y", range=[-2.3, 2.3]),
+            zaxis=dict(**AXIS, title_text="z (beam)", range=[-2.3, 2.3]),
+            camera=dict(eye=dict(x=1.45, y=1.05, z=0.85)),
+        ), paper_bgcolor="white",
     )
     return fig

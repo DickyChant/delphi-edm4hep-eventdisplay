@@ -16,6 +16,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 from . import geometry as G
+from ._flow import angles, objects, unit_direction
 from ._logo import LOGO_DATA_URI
 from .read import Event
 
@@ -37,6 +38,7 @@ MPI, MK, MP = 0.13957, 0.49368, 0.93827
 N_LIQ, N_GAS = 1.2718, 1.0019  # DELPHI RICH refractive indices: C6F14 liquid, C5F12 gas
 GAS_THR = {"π": MPI / np.sqrt(N_GAS**2 - 1), "K": MK / np.sqrt(N_GAS**2 - 1), "p": MP / np.sqrt(N_GAS**2 - 1)}
 SHOWER_SCALE = 90.0  # mm per GeV, tower length in panels (a) and (b)
+JETC = "#2a9d8f"  # separate from the grey jet axes in detector space
 
 
 def _template():
@@ -377,4 +379,82 @@ def build(
 
     for ann, ax in zip(fig.layout.annotations[:5], ("xaxis", "xaxis2", "xaxis3", "xaxis4", "xaxis5")):
         ann.update(font=dict(size=13.5), x=fig.layout[ax].domain[0], xanchor="left")
+    return fig
+
+
+def build_flow2d(
+    e: Event,
+    *,
+    groups: dict | None = None,
+    hide: dict | None = None,
+    jets: bool = True,
+    title: str = "",
+    note: str = "",
+    width: int = 1100,
+    height: int = 1000,
+) -> go.Figure:
+    """Poynting-style energy-flow map in (φ, cos θ), covering the full solid angle.
+
+Marker area scales with |p| for charged tracks and E for clusters/jets, with a
+4-pixel diameter floor for visibility. Jets use a larger marker scale. This is
+a direction-space display, not a calculation of the electromagnetic Poynting
+vector, and tracks/clusters/jets are not summed as independent energy deposits.
+"""
+    groups, hide = groups or {}, hide or {}
+    roles = getattr(e, "roles", {}) or {}
+    drawn, reference = objects(e, hide, jets)
+    fig = go.Figure()
+    batches = {}
+
+    # Batch markers by role/group, while keeping each object's index in hover text.
+    for obj in sorted(drawn, key=lambda obj: obj.role == "tracks" and obj.index in groups):
+        if obj.role == "tracks":
+            label, color = groups.get(obj.index, ("charged tracks", GREY))
+            group = f"g:{label}" if obj.index in groups else "trkother"
+            symbol, maximum = "circle", 22.0
+        elif obj.role == "em_clusters":
+            label, color, group, symbol, maximum = "EM clusters (area ∝ E)", SHOWER, "em", "diamond", 22.0
+        else:
+            label, color, group, symbol, maximum = "jets (area ∝ E)", JETC, "jet", "square", 40.0
+        key = (obj.role, label, color, group, symbol)
+        batch = batches.setdefault(key, dict(x=[], y=[], size=[], hover=[]))
+        phi, cth, _theta = angles(obj.direction)
+        batch["x"].append(phi)
+        batch["y"].append(cth)
+        batch["size"].append(max(4.0, maximum * np.sqrt(obj.magnitude / reference)))
+        batch["hover"].append(obj.hover)
+    for (role, label, color, group, symbol), batch in batches.items():
+        fig.add_trace(go.Scatter(
+            x=batch["x"], y=batch["y"], mode="markers",
+            marker=dict(size=batch["size"], sizemode="diameter", symbol=symbol, color=color,
+                        line=dict(color="black", width=0.6)),
+            name=label, legendgroup=group, showlegend=True,
+            hovertemplate="%{text}<extra></extra>", text=batch["hover"],
+            meta={"role": role, "collection": roles.get(role, "")},
+        ))
+
+    thrust = unit_direction(e.thrust)
+    if thrust is not None:
+        for sign, tag in ((1.0, "+"), (-1.0, "−")):
+            phi, cth, _theta = angles(sign * thrust)
+            fig.add_trace(go.Scatter(
+                x=[phi], y=[cth], mode="markers",
+                marker=dict(symbol="star", size=17, color=PVC, line=dict(color="black", width=1)),
+                name="thrust axis", legendgroup="thrust", showlegend=sign > 0,
+                hovertemplate=f"thrust axis ({tag})<extra></extra>",
+                meta={"role": "", "collection": ""},
+            ))
+
+    fig.update_layout(
+        meta=dict(run=e.run, event=e.event, entry=e.entry, source=e.path.split("/")[-1],
+                  n_charged=e.n_charged, n_neutral=e.n_neutral, b_field=e.b_field,
+                  btag=e.btag_event, title=title, note=note, view="flow2d"),
+        template=_template(), showlegend=True, width=width, height=height,
+        images=[logo_image(size=0.07)],
+        legend=dict(orientation="h", yanchor="top", y=-0.08, xanchor="center", x=0.5, font=dict(size=12)),
+        margin=dict(l=70, r=30, t=70, b=110), hovermode="closest",
+        hoverlabel=dict(bgcolor="white", font_size=12), plot_bgcolor="white", paper_bgcolor="white",
+    )
+    fig.update_xaxes(title_text="φ [deg]", range=[-180, 180], dtick=90)
+    fig.update_yaxes(title_text="cos θ", range=[-1.05, 1.05])
     return fig

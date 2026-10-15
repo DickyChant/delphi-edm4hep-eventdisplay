@@ -11,6 +11,7 @@ D=${D:-/eos/experiment/eealliance/Users/zhangj/edm4hepSimBTagging}
 OUT=${OUT:-docs/events}
 
 delphi-display "$D/data_94c/Y13709.126.edm4hep.root" --entry 3990 --out "$OUT/data_48758_2666.html" \
+  --view all \
   --require-vd \
   --title 'Z → bb̄ with a displaced φ → K⁺K⁻' \
   --note 'SVs at 9.66 mm (φ side) and 2.87 mm' \
@@ -21,6 +22,7 @@ delphi-display "$D/data_94c/Y13709.126.edm4hep.root" --entry 3990 --out "$OUT/da
   --rich 20,22,21,6,25
 
 delphi-display "$D/Zbb/bb_1000182.edm4hep.root" --entry 422 --out "$OUT/mc_bb1000182_e423.html" \
+  --view all \
   --title 'Simulated Z → bb̄ — B⁺ (φ and D̄⁰) + B̄⁰ (D⁺ → K⁻π⁺π⁺)' \
   --note 'simulation: Pythia 8 + DELSIM' \
   --group 'φ → K⁺K⁻ from D_s⁺ (RICH-identified):#d62728:4,0' \

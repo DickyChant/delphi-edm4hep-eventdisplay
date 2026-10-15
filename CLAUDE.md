@@ -13,8 +13,9 @@ docs/build.sh                                      # rebuild the wheel the brows
 examples/make_events.sh                            # the two talk events (needs $D pointing at the EOS data)
 ```
 
-There is no test suite. Correctness is checked by the self-checks the CLI prints on every run
-(see below) — treat a change in those numbers as a regression.
+Run `pytest` for synthetic-event tests of the flow figures, CLI output modes and site manifest.
+The physics self-checks the CLI prints on real input (see below) remain essential; treat a
+change in those numbers as a regression. Synthetic tests do not replace the EOS data checks.
 
 Event data is not in the repository. A local copy for development:
 
@@ -65,6 +66,14 @@ schema.py    file                  -> what collections exist, their links and co
 `figure.build()` takes an `Event` and returns a figure; it never touches the filesystem. That is
 what lets the same code run unmodified in the browser under Pyodide (`docs/app.html`), where
 uproot reads a dropped file in WASM and the identical `read_event`/`build` produce the figure.
+
+`build_flow2d` and `build_flow3d` provide Poynting-style direction views: a φ–cos θ map
+and a unit sphere with energy quills. The shared `_flow.py` filters undefined/nonfinite
+directions and invalid magnitudes before normalization. The app selects dimension and
+lab/Poynting frame independently; the CLI supports `--view flow2d|flow3d|all`.
+Regenerate the real showcase sidecars with `examples/make_events.sh` on EOS, then run
+`delphi-pages`; those ROOT inputs are not in the repository. Rebuild the browser wheel
+with `docs/build.sh` whenever package source changes.
 
 **Nothing is pinned by collection name.** `schema.read_schema()` reads podio's own metadata and
 `Schema.resolve()` binds each display *role* (`particles`, `tracks`, `primary_vertex`,

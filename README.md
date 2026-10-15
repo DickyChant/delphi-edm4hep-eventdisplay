@@ -14,26 +14,37 @@ edm4hep file on it to step through that file's events instead — read in the br
 under Pyodide, so nothing is uploaded. Beside the figure is every collection in the event with its
 type, domain, provenance, links and per-event counts; selecting one dims everything in the figure
 that did not come from it, and clicking a track selects its collection. Switch between the four
-panels and a 3-D detector scene, and save either as PNG, SVG or figure JSON.
+panels and a 3-D detector scene, or choose **Poynting** for a 2-D angular energy-flow map or a
+3-D direction sphere. Save any available view as PNG, SVG or figure JSON.
 
 ## Install and run
+
+To try all four views without a ROOT file, open
+[`app.html?ev=synthetic_flow_demo`](docs/app.html?ev=synthetic_flow_demo) on a hosted copy,
+or select **Synthetic two-jet energy-flow demo** in the event menu. Choose **Poynting**,
+then switch between **panels** and **3D**. This is a clearly labelled, hand-built
+illustration, not DELPHI collision data or a physics simulation. It can be reproduced with
+`python examples/make_synthetic_event.py` followed by `delphi-pages`.
 
 ```bash
 pip install -e .
 delphi-display FILE.edm4hep.root --entry 3990 --out docs/events/my_event.html \
-    --require-vd --rich 20,22,21 \
+    --view all --require-vd --rich 20,22,21 \
     --group 'φ → K⁺K⁻ (both kaons RICH-identified):#d62728:20,22'
 delphi-pages      # rebuild docs/events/index.json so the site lists the new event
 docs/build.sh     # rebuild the wheel the browser app installs (CI fails if it is stale)
 ```
 
-Each run writes two files: a **self-contained `.html`** (plotly.js inlined, ~5 MB, opens offline)
-and a **`.json`** figure (~0.5 MB) — the JSON is what the site and the editor load, and the only
-one committed. `examples/make_events.sh` holds the exact commands for the two talk events.
+By default each run writes a **self-contained `.html`** (plotly.js inlined, ~5 MB, opens offline),
+a **`.json`** figure and a `.schema.json` collection sidecar. The site and editor load the JSON;
+standalone HTML is not committed. `--view all` additionally writes `.3d`, `.flow2d` and `.flow3d`
+HTML/JSON pairs beside the base panels figure. `delphi-pages` discovers only sidecars that exist.
+`examples/make_events.sh` holds the commands for all four views of the two talk events; the
+original ROOT files are needed to regenerate their new energy-flow sidecars.
 
 Options mirror the matplotlib original: `--title`, `--note`, `--group 'label:colour:i,j,k'`
 (repeatable), `--rich i,j,...`, `--fit-vertex i,j`, `--require-vd`, `--max-ip MM`, `--jets`,
-`--width/--height`, `--cdn`. Track indices come from the original `dump_event.py --run --event`
+`--width/--height`, `--cdn`, `--view panels|3d|both|flow2d|flow3d|all`. Track indices come from the original `dump_event.py --run --event`
 (data) or `mc_dump_event.py --entry` (simulation).
 
 ## Any file, any collection
@@ -79,6 +90,22 @@ suggests a path the particle never travelled.
 What Plotly adds over the original: hover naming each track (charge, momentum, VD hits, which
 vertex it starts from), a legend that switches whole classes of object off, and free zoom.
 
+### Spherical energy-flow views
+
+The browser's dimension (`panels` / `3D`) and frame (`lab` / `Poynting`) toggles offer four views.
+Poynting displays charged-track momentum directions, EM-cluster directions from the detector
+origin, jets and the thrust axis on a φ–cos θ map or a draggable unit sphere. In 2-D, marker area
+scales with energy (clusters/jets) or |p| (tracks), above a small visibility floor; the sphere adds
+radial quills whose lengths scale with the square root of the same weight. Collection selection and track highlighting work in these views too.
+
+“Poynting” names an angular energy-flow visualization, not a computation of **E × H** or a
+Lorentz transformation. Tracks and clusters may overlap physically, so their displayed weights
+are not an additive reconstructed energy total. See [the view guide](doc/views.md).
+
+Use `--view flow2d` or `--view flow3d` for a single flow figure, `--view all` for all four, and
+`--view both` for the original two lab views. Live-file mode builds all four. Existing showcase
+events offer Poynting only after their flow sidecars have been generated and indexed.
+
 ## Captions, not headings
 
 `--title` and `--note` describe **one event** ("Z → bb̄ with a displaced φ → K⁺K⁻"), so they are
@@ -89,7 +116,7 @@ figures themselves carry no text that would go stale on the next event, except t
 DELPHI + EDM4hep mark (`_logo.py`, a data URI, so it survives PNG/SVG export and offline HTML).
 
 The browser app saves the current view as **PNG**, **SVG** or the **figure JSON**, named after the
-run and event.
+run and event, with `_3d`, `_poynt` or `_3d_poynt` identifying the selected view.
 
 ## Layout
 
@@ -97,7 +124,8 @@ run and event.
 |---|---|
 | `src/delphi_eventdisplay/read.py` | edm4hep → an `Event`: the collection names and every decoding rule |
 | `src/delphi_eventdisplay/geometry.py` | helices, the curvature-sign check, where each track starts, the self-checks |
-| `src/delphi_eventdisplay/figure.py` | the four panels → one `go.Figure` |
+| `src/delphi_eventdisplay/figure.py` | the four panels and the 2-D flow map → `go.Figure` |
+| `src/delphi_eventdisplay/figure3d.py` | the detector scene and the direction sphere → `go.Figure` |
 | `src/delphi_eventdisplay/cli.py` | `delphi-display` |
 | `src/delphi_eventdisplay/pages.py` | `delphi-pages`, rebuilds the site manifest |
 | `src/delphi_eventdisplay/schema.py` | collection discovery from podio metadata; roles, counts, links |

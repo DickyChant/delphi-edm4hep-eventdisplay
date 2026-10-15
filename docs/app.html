@@ -10,9 +10,10 @@
  header { padding:12px 20px; border-bottom:1px solid var(--line); display:flex; gap:14px; align-items:center; flex-wrap:wrap; background:#fff; }
  header h1 { font:700 18px "TeX Gyre Heros",Helvetica,Arial,sans-serif; margin:0; white-space:nowrap; } header h1 span { color:var(--navy); }
  #logo { height:34px; width:34px; object-fit:contain; }
- #views { display:inline-flex; } #views .view { border-radius:0; margin:0; }
- #views .view:first-child { border-radius:4px 0 0 4px; } #views .view:last-child { border-radius:0 4px 4px 0; border-left:none; }
- #views .view.on { background:var(--navy); color:#fff; border-color:var(--navy); }
+ #views, #frames { display:inline-flex; } #views .view, #frames .frame { border-radius:0; margin:0; }
+ #views .view:first-child, #frames .frame:first-child { border-radius:4px 0 0 4px; }
+ #views .view:last-child, #frames .frame:last-child { border-radius:0 4px 4px 0; border-left:none; }
+ #views .view.on, #frames .frame.on { background:var(--navy); color:#fff; border-color:var(--navy); }
  #saves { display:inline-flex; } #saves button { border-radius:0; }
  #saves button:first-child { border-radius:4px 0 0 4px; }
  #saves button:last-child { border-radius:0 4px 4px 0; }
@@ -59,8 +60,11 @@
 <header>
  <img src="logo.png" alt="DELPHI + EDM4hep" id="logo">
  <h1>DELPHI <span>event display</span></h1>
- <span id="views" class="mono">
-   <button id="v2d" class="view on">panels</button><button id="v3d" class="view">3D</button>
+ <span id="views" class="mono" role="group" aria-label="dimension">
+   <button id="v2d" class="view on" aria-pressed="true" disabled>panels</button><button id="v3d" class="view" aria-pressed="false" disabled>3D</button>
+ </span>
+ <span id="frames" class="mono" role="group" aria-label="frame">
+   <button id="flab" class="frame on" aria-pressed="true" disabled>lab</button><button id="fpoynt" class="frame" aria-pressed="false" disabled>Poynting</button>
  </span>
  <select id="showcase" title="published events"></select>
  <span id="drop">or drop an <b>.edm4hep.root</b> file to open any event
@@ -69,9 +73,9 @@
  <button id="prev" disabled>◀</button><button id="next" disabled>▶</button>
  <button id="render" class="primary" disabled>render</button>
  <span id="saves" class="mono">
-   <button id="savePng" title="save this view as a PNG">PNG</button
-   ><button id="saveSvg" title="save this view as an SVG">SVG</button
-   ><button id="saveJson" title="save the Plotly figure JSON">JSON</button>
+   <button id="savePng" disabled title="save this view as a PNG">PNG</button
+   ><button id="saveSvg" disabled title="save this view as an SVG">SVG</button
+   ><button id="saveJson" disabled title="save the Plotly figure JSON">JSON</button>
  </span>
  <span id="status">loading the showcase event…</span>
  <a href="./" title="back to the landing page">← home</a>
@@ -107,8 +111,20 @@
   let py = null, booting = null, loadedName = null;
   let schema = null, figure = null, selected = null, domains = {}, manifest = { events: [] };
   let mode = 'showcase';            // 'showcase' = published JSON, 'live' = a file read in the browser
-  let view = '2d';                  // '2d' = four panels, '3d' = detector scene
-  let figs = { '2d': null, '3d': null };   // both views of the event currently shown
+  let dimension = '2d', frame = 'lab';  // {2d, 3d} × {lab, poynt}
+  let figs = {}, displayedKey = null;
+  let request = 0, drawRequest = 0, pendingPlots = 0, busy = false, plotting = false;
+  let plotQueue = Promise.resolve(), pythonQueue = Promise.resolve();
+  const viewKey = () => dimension + ':' + frame;
+  const plotConfig = { displaylogo:false, scrollZoom:true, responsive:false,
+                       modeBarButtonsToRemove:['select2d','lasso2d'] };
+  const copy = value => JSON.parse(JSON.stringify(value));
+  // Pyodide and Plotly both mutate shared state; never run two calls concurrently.
+  const inPython = work => {
+    const result = pythonQueue.then(work);
+    pythonQueue = result.catch(() => {});
+    return result;
+  };
 
   const setStatus = (msg, cls='') => { $('status').textContent = msg; $('status').className = cls; };
   const bar = pct => { $('bar').style.width = pct + '%'; };
@@ -119,48 +135,89 @@
     catch (e) { domains = {}; }
   }
 
+  function clearFigure(id) {
+    // An obsolete newPlot can still mutate its DOM after its request was cancelled.
+    // Hide it immediately, disable exports, and purge only once Plotly has finished.
+    figs = {}; figure = null; displayedKey = null;
+    gd.style.display = 'none'; $('info').textContent = '';
+    $('splash').style.display = '';
+    plotQueue = plotQueue.then(() => {
+      if (id === request && !figure) Plotly.purge(gd);
+    }).catch(() => {});
+  }
+
+  function beginRequest(clear = false) {
+    const id = ++request;
+    ++drawRequest;
+    if (clear || plotting) clearFigure(id);
+    busy = true; setMode(); refreshButtons();
+    return id;
+  }
+
+  function endRequest(id) {
+    if (id !== request) return;
+    busy = false; setMode(); refreshButtons();
+  }
+
+  function finishProgress(id) {
+    bar(100);
+    setTimeout(() => { if (id === request) bar(0); }, 500);
+  }
+
+  async function fetchJSON(url) {
+    const response = await fetch(url);
+    if (!response.ok) throw new Error(`${url}: HTTP ${response.status}`);
+    return response.json();
+  }
+
   // ---------------------------------------------------------------- showcase
   async function loadShowcase(key) {
+    const id = beginRequest();
     try {
       const ev = manifest.events.find(e => e.key === key) || manifest.events[0];
       if (!ev) { setStatus('no published events; drop a file to begin'); return; }
       $('showcase').value = ev.key;
       setStatus(`loading ${ev.title}…`); bar(40);
-      const [fig, sch, f3] = await Promise.all([
-        fetch(ev.file).then(r => r.json()),
-        ev.schema ? fetch(ev.schema).then(r => r.json()).catch(() => null) : Promise.resolve(null),
-        ev.figure3d ? fetch(ev.figure3d).then(r => r.json()).catch(() => null) : Promise.resolve(null),
+      const optional = url => url ? fetchJSON(url).catch(() => null) : Promise.resolve(null);
+      const [fig, sch, f3, flow2d, flow3d] = await Promise.all([
+        fetchJSON(ev.file), optional(ev.schema), optional(ev.figure3d),
+        optional(ev.figureflow2d), optional(ev.figureflow3d),
       ]);
+      if (id !== request) return;
       mode = 'showcase'; loadedName = null;
-      setMode();
-      await show({ '2d': fig, '3d': f3 }, sch);
-      bar(100); setTimeout(() => bar(0), 500);
+      // A flow-only or 3D-only CLI export is also a valid primary figure.
+      const primary = { panels:'2d:lab', '3d':'3d:lab', flow2d:'2d:poynt', flow3d:'3d:poynt' }[
+        fig.layout && fig.layout.meta && fig.layout.meta.view] || '2d:lab';
+      const views = { '3d:lab':f3, '2d:poynt':flow2d, '3d:poynt':flow3d, [primary]:fig };
+      await show(views, sch, id);
+      if (id !== request) return;
+      finishProgress(id);
       const n = sch ? Object.values(sch.collections).filter(c => c.count).length : 0;
-      setStatus(`${ev.source} entry ${ev.entry} — ${n} collections populated · drop a file to open any event`, 'ok');
-    } catch (err) { setStatus('could not load the showcase: ' + err.message, 'err'); bar(0); }
+      const flowNote = !(views['2d:poynt'] || views['3d:poynt'])
+        ? ' · Poynting not published: regenerate this event with --view all and run delphi-pages' : '';
+      setStatus(`${ev.source} entry ${ev.entry} — ${n} collections populated${flowNote} · drop a file to open any event`, 'ok');
+    } catch (err) {
+      if (id === request) { setStatus('could not load the showcase: ' + err.message, 'err'); bar(0); }
+    } finally { endRequest(id); }
   }
 
-  // shared renderer for both modes; takes both views and draws the selected one
-  async function show(pair, sch) {
-    figs = pair;
-    $('v3d').disabled = !figs['3d'];
-    $('v3d').title = figs['3d'] ? '' : 'no 3-D figure published for this event';
-    if (view === '3d' && !figs['3d']) view = '2d';
-    setViewButtons();
-    figure = figs[view] || figs['2d'];
+  // A new event keeps the requested axes if possible, then falls back to an available view.
+  async function show(views, sch, id) {
+    figs = views;
+    const key = [viewKey(), dimension + ':lab', '2d:' + frame, '2d:lab', '3d:lab', '2d:poynt', '3d:poynt']
+      .find(k => figs[k]);
+    if (!key) throw new Error('no figure available');
+    [dimension, frame] = key.split(':');
     schema = sch;
-    drawInfo((figure && figure.layout && figure.layout.meta) || {});
     if (schema) for (const [n, c] of Object.entries(schema.collections))
       if (!c.domain || c.domain === 'unknown') c.domain = domains[n] || 'unknown';
-    $('splash').style.display = 'none'; gd.style.display = '';
-    await Plotly.react(gd, figure.data, figure.layout,
-      { displaylogo:false, scrollZoom:true, responsive:false, modeBarButtonsToRemove:['select2d','lasso2d'] });
-    gd.removeAllListeners && gd.removeAllListeners('plotly_click');
-    gd.on('plotly_click', ev => {
-      const m = ev.points[0] && ev.points[0].data.meta;
-      if (m && m.collection) select(m.collection);
-    });
-    if (schema) { drawRoles(); drawColls(); select(selected); }
+    if (!schema || !schema.collections[selected]) selected = null;
+    if (schema) { drawRoles(); drawColls(); }
+    else {
+      $('roles').textContent = 'no collection metadata available';
+      $('colls').textContent = ''; $('detail').textContent = '';
+    }
+    await redraw(id);
   }
 
   // The figure carries no title or run/event line; they are rendered here from
@@ -179,81 +236,140 @@
     $('info').innerHTML = bits.join('');
   }
 
-  function setViewButtons() {
-    $('v2d').classList.toggle('on', view === '2d');
-    $('v3d').classList.toggle('on', view === '3d');
+  function refreshButtons() {
+    const set = (id, available, on) => {
+      const button = $(id);
+      button.disabled = busy || !available;
+      button.classList.toggle('on', on && available);
+      button.setAttribute('aria-pressed', String(on && available));
+      button.title = available ? '' : (id === 'fpoynt'
+        ? 'Poynting views are not published for this event; regenerate with --view all and run delphi-pages'
+        : 'this view is not available for this event');
+    };
+    // Allow a change on either axis even when only diagonal combinations exist.
+    set('v2d', !!(figs['2d:lab'] || figs['2d:poynt']), dimension === '2d');
+    set('v3d', !!(figs['3d:lab'] || figs['3d:poynt']), dimension === '3d');
+    set('flab', !!(figs['2d:lab'] || figs['3d:lab']), frame === 'lab');
+    set('fpoynt', !!(figs['2d:poynt'] || figs['3d:poynt']), frame === 'poynt');
+    ['savePng','saveSvg','saveJson'].forEach(id => { $(id).disabled = !figure || busy || plotting; });
   }
 
-  async function setView(v) {
-    if (v === view || !figs[v]) return;
-    view = v; setViewButtons();
-    figure = figs[view];
-    await Plotly.newPlot(gd, figure.data, figure.layout,
-      { displaylogo:false, scrollZoom:true, responsive:false, modeBarButtonsToRemove:['select2d','lasso2d'] });
-    gd.on('plotly_click', ev => {
-      const m = ev.points[0] && ev.points[0].data.meta;
-      if (m && m.collection) select(m.collection);
+  function redraw(id = request) {
+    const draw = ++drawRequest, key = viewKey(), nextFigure = figs[key];
+    ++pendingPlots; plotting = true; refreshButtons();
+    const result = plotQueue.then(async () => {
+      if (id !== request || draw !== drawRequest) return;
+      // Keep pristine traces: Plotly.restyle must not overwrite their base opacity.
+      const shown = copy(nextFigure);
+      $('splash').style.display = 'none'; gd.style.display = '';
+      await Plotly.newPlot(gd, shown.data, shown.layout, plotConfig);
+      if (id !== request || draw !== drawRequest) return;
+      figure = nextFigure; displayedKey = key;
+      drawInfo((figure.layout && figure.layout.meta) || {});
+      gd.removeAllListeners && gd.removeAllListeners('plotly_click');
+      gd.on('plotly_click', ev => {
+        const m = ev.points[0] && ev.points[0].data.meta;
+        if (m && m.collection) select(m.collection);
+      });
+      await select(selected, true);
+    }).finally(() => {
+      plotting = --pendingPlots > 0;
+      refreshButtons();
     });
-    if (selected) dim(selected);
+    plotQueue = result.catch(() => {});
+    return result;
+  }
+
+  async function pickView(axis, value) {
+    if (busy) return;
+    const candidates = axis === 'dimension'
+      ? [value + ':' + frame, value + ':lab', value + ':poynt']
+      : [dimension + ':' + value, '2d:' + value, '3d:' + value];
+    const key = candidates.find(k => figs[k]);
+    if (!key || key === viewKey()) return;
+    [dimension, frame] = key.split(':');
+    try { await redraw(); }
+    catch (err) { setStatus('could not draw this view: ' + err.message, 'err'); }
   }
 
   function setMode() {
     const live = mode === 'live';
     ['entry','prev','next','render'].forEach(id => {
-      $(id).disabled = !live;
+      $(id).disabled = !live || busy;
       $(id).title = live ? '' : 'load an .edm4hep.root file to step through entries';
     });
+    if (live && !busy) {
+      $('prev').disabled = +$('entry').value <= 0;
+      $('next').disabled = +$('entry').value >= +$('entry').max;
+    }
     document.querySelectorAll('#roles select').forEach(sel => {
-      sel.disabled = !live;
+      sel.disabled = !live || busy;
       sel.title = live ? '' : 'load the .root file to draw a different collection';
     });
   }
 
   // ------------------------------------------------------------------- live
-  async function boot() {
+  async function boot(id) {
     if (py) return py;
     if (booting) return booting;
+    const status = (msg, cls='') => { if (id === request) setStatus(msg, cls); };
+    const progress = pct => { if (id === request) bar(pct); };
     booting = (async () => {
-      setStatus('booting Python (first time only)…'); bar(10);
+      status('booting Python (first time only)…'); progress(10);
       const p = await loadPyodide({ indexURL: 'https://cdn.jsdelivr.net/pyodide/v0.28.0/full/' });
-      bar(35); setStatus('loading numpy and awkward…');
+      progress(35); status('loading numpy and awkward…');
       await p.loadPackage(['numpy', 'awkward-cpp', 'micropip']);
-      bar(55); setStatus('installing uproot, awkward, plotly…');
+      progress(55); status('installing uproot, awkward, plotly…');
       const mp = p.pyimport('micropip');
       await mp.install(['uproot', 'awkward', 'plotly']);
-      bar(78); setStatus('installing delphi_eventdisplay…');
+      progress(78); status('installing delphi_eventdisplay…');
       let wheel = 'wheels/delphi_eventdisplay-0.1.0-py3-none-any.whl';
       try { const m = await fetch('wheels/index.json').then(r => r.json()); if (m.wheel) wheel = 'wheels/' + m.wheel; } catch (e) {}
       await mp.install(new URL(wheel, location.href).href);
       p.globals.set('DOMAINS_JSON', JSON.stringify(domains));
       p.FS.mkdir('/work');
-      py = p; bar(95);
+      py = p; progress(95);
       return p;
     })().catch(err => {
       booting = null;
-      setStatus('could not start Python in this browser: ' + err.message +
+      status('could not start Python in this browser: ' + err.message +
                 ' — the showcase event above still works', 'err');
-      bar(0); throw err;
+      progress(0); throw err;
     });
     return booting;
   }
 
   async function loadFile(f) {
+    const id = beginRequest(true);
     try {
-      await boot();
+      await boot(id);
+      if (id !== request) return;
       setStatus(`reading ${f.name} (${(f.size/1e6).toFixed(0)} MB)…`);
-      py.FS.writeFile('/work/' + f.name, new Uint8Array(await f.arrayBuffer()));
-      loadedName = f.name;
-      const n = await py.runPythonAsync(`
+      const bytes = new Uint8Array(await f.arrayBuffer());
+      const n = await inPython(async () => {
+        if (id !== request) return null;
+        // Fixed virtual path and Python globals keep filenames/collection names out of code.
+        py.FS.writeFile('/work/event.root', bytes);
+        return py.runPythonAsync(`
 from delphi_eventdisplay.read import n_entries
-n_entries("/work/${f.name}")
+n_entries("/work/event.root")
 `);
+      });
+      if (id !== request) return;
+      if (!n) throw new Error('the file contains no events');
+      loadedName = f.name;
       $('entry').max = n - 1;
       if (+$('entry').value > n - 1) $('entry').value = 0;
-      mode = 'live'; setMode();
+      // Collection choices from another file must not leak into the first read.
+      $('roles').textContent = 'render an entry to choose collections';
+      schema = null; selected = null;
+      $('colls').textContent = ''; $('detail').textContent = '';
+      mode = 'live';
       setStatus(`${f.name}: ${n.toLocaleString()} events — choose an entry and render`, 'ok');
       bar(0);
-    } catch (err) { setStatus('failed to read the file: ' + err.message, 'err'); bar(0); }
+    } catch (err) {
+      if (id === request) { loadedName = null; mode = 'showcase'; setStatus('failed to read the file: ' + err.message, 'err'); bar(0); }
+    } finally { endRequest(id); }
   }
 
   function overridesJSON() {
@@ -263,37 +379,49 @@ n_entries("/work/${f.name}")
   }
 
   async function render() {
-    if (mode !== 'live' || !loadedName) return;
+    if (mode !== 'live' || !loadedName || busy) return;
     const entry = +$('entry').value;
+    if (!Number.isInteger(entry) || entry < 0 || entry > +$('entry').max) {
+      setStatus(`choose an entry from 0 to ${$('entry').max}`, 'err'); return;
+    }
+    const id = beginRequest(), overrides = overridesJSON(), source = loadedName;
     try {
-      $('render').disabled = true;
       setStatus(`building entry ${entry}…`); bar(30);
-      const out = await py.runPythonAsync(`
+      const out = await inPython(async () => {
+        if (id !== request) return null;
+        py.globals.set('OVERRIDES_JSON', overrides);
+        py.globals.set('ENTRY', entry);
+        py.globals.set('SOURCE_NAME', source);
+        return py.runPythonAsync(`
 import json
-from delphi_eventdisplay import read_event, build, build3d
+from delphi_eventdisplay import read_event, build, build3d, build_flow2d, build_flow3d
 from delphi_eventdisplay.schema import to_dict
 
-_ov = json.loads(r\'\'\'${overridesJSON()}\'\'\')
-_e = read_event("/work/${loadedName}", ${entry}, collections=_ov or None,
+_ov = json.loads(OVERRIDES_JSON)
+_e = read_event("/work/event.root", ENTRY, collections=_ov or None,
                 domains=json.loads(DOMAINS_JSON))
 # show the tracks the RICH actually saw, highest momentum first
 _rich = sorted([i for i, h in _e.haid.items() if len(h) >= 18 and (h[15] > 0 or h[10] > 0)],
                key=lambda i: -float(_e.p_abs[i]))[:6]
-_fig = build(_e, rich=_rich)
-_f3 = build3d(_e)
-json.dumps({"figure": json.loads(_fig.to_json()),
-            "figure3d": json.loads(_f3.to_json()),
+_views = {"figure": build(_e, rich=_rich), "figure3d": build3d(_e),
+          "figureflow2d": build_flow2d(_e), "figureflow3d": build_flow3d(_e)}
+for _figure in _views.values():
+    _figure.layout.meta = dict(_figure.layout.meta or {}, source=SOURCE_NAME)
+json.dumps({**{name: json.loads(fig.to_json()) for name, fig in _views.items()},
             "schema": to_dict(_e.schema, _e.roles)})
 `);
+      });
+      if (id !== request) return;
       bar(80);
       const res = JSON.parse(out);
-      await show({ '2d': res.figure, '3d': res.figure3d }, res.schema);
-      setMode();
-      bar(100); setTimeout(() => bar(0), 500);
+      await show({ '2d:lab':res.figure, '3d:lab':res.figure3d,
+                   '2d:poynt':res.figureflow2d, '3d:poynt':res.figureflow3d }, res.schema, id);
+      if (id !== request) return;
+      finishProgress(id);
       setStatus(`entry ${entry}: ${Object.values(schema.collections).filter(c=>c.count).length} collections populated`, 'ok');
     } catch (err) {
-      setStatus('render failed: ' + err.message, 'err'); bar(0);
-    } finally { $('render').disabled = (mode !== 'live'); }
+      if (id === request) { setStatus('render failed: ' + err.message, 'err'); bar(0); }
+    } finally { endRequest(id); }
   }
 
   // --------------------------------------------------------- collection panel
@@ -351,11 +479,11 @@ json.dumps({"figure": json.loads(_fig.to_json()),
     }
   }
 
-  function select(name) {
-    selected = name;
+  function select(name, force = false) {
+    selected = name = schema && schema.collections[name] ? name : null;
     document.querySelectorAll('.coll').forEach(d => d.classList.toggle('sel', d.dataset.name === name));
     const det = $('detail');
-    if (!name || !schema || !schema.collections[name]) { det.innerHTML = ''; dim(null); return; }
+    if (!name || !schema || !schema.collections[name]) { det.innerHTML = ''; return dim(null, force); }
     const c = schema.collections[name];
     const linksOut = c.links.map(l => l.relation + ' \u2192 ' + l.to);
     const linksIn = Object.entries(schema.collections).flatMap(([n, cc]) =>
@@ -370,16 +498,16 @@ json.dumps({"figure": json.loads(_fig.to_json()),
       + '<dt>links out</dt><dd>' + (linksOut.length ? linksOut.join('<br>') : '\u2014') + '</dd>'
       + '<dt>links in</dt><dd>' + (linksIn.length ? linksIn.join('<br>') : '\u2014') + '</dd>'
       + '</dl>';
-    dim(name);
+    return dim(name, force);
   }
 
-  function dim(name) {
-    if (!figure) return;
+  function dim(name, force = false) {
+    if (!figure || (plotting && !force)) return;
     const op = figure.data.map(t => {
-      if (!name) return (t.opacity === undefined ? 1 : t.opacity);
-      return (t.meta && t.meta.collection === name) ? 1 : 0.12;
+      const base = t.opacity === undefined ? 1 : t.opacity;
+      return !name || (t.meta && t.meta.collection === name) ? base : base * 0.12;
     });
-    Plotly.restyle(gd, { opacity: op });
+    return Plotly.restyle(gd, { opacity: op });
   }
 
   // ------------------------------------------------------------------ wiring
@@ -395,14 +523,16 @@ json.dumps({"figure": json.loads(_fig.to_json()),
   });
   $('render').addEventListener('click', render);
   $('prev').addEventListener('click', () => { $('entry').value = Math.max(0, +$('entry').value - 1); render(); });
-  $('next').addEventListener('click', () => { $('entry').value = +$('entry').value + 1; render(); });
+  $('next').addEventListener('click', () => { $('entry').value = Math.min(+$('entry').max, +$('entry').value + 1); render(); });
+  $('entry').addEventListener('input', setMode);
   $('find').addEventListener('input', () => schema && drawColls());
   $('onlyfilled').addEventListener('change', () => schema && drawColls());
   $('showcase').addEventListener('change', e => loadShowcase(e.target.value));
   function saveName() {
     const m = (figure && figure.layout && figure.layout.meta) || {};
     const base = m.run != null ? `delphi_run${m.run}_evt${m.event}` : 'delphi_event';
-    return base + (view === '3d' ? '_3d' : '');
+    const [savedDimension, savedFrame] = (displayedKey || viewKey()).split(':');
+    return base + (savedDimension === '3d' ? '_3d' : '') + (savedFrame === 'poynt' ? '_poynt' : '');
   }
   $('savePng').addEventListener('click', () =>
     Plotly.downloadImage(gd, { format:'png', scale:2, filename:saveName(),
@@ -419,17 +549,21 @@ json.dumps({"figure": json.loads(_fig.to_json()),
     setTimeout(() => URL.revokeObjectURL(a.href), 2000);
   });
 
-  $('v2d').addEventListener('click', () => setView('2d'));
-  $('v3d').addEventListener('click', () => setView('3d'));
+  $('v2d').addEventListener('click', () => pickView('dimension', '2d'));
+  $('v3d').addEventListener('click', () => pickView('dimension', '3d'));
+  $('flab').addEventListener('click', () => pickView('frame', 'lab'));
+  $('fpoynt').addEventListener('click', () => pickView('frame', 'poynt'));
 
   // open on the showcase event: published JSON, no Python needed
   (async function init() {
+    const id = request;
     await loadDomains();
-    try { manifest = await fetch('events/index.json').then(r => r.json()); } catch (e) {}
+    try { manifest = await fetchJSON('events/index.json'); } catch (e) {}
     for (const ev of manifest.events) {
       const o = document.createElement('option'); o.value = ev.key; o.textContent = ev.title;
       $('showcase').appendChild(o);
     }
+    if (id !== request) return;  // a file chosen during startup takes precedence
     if (!manifest.events.length) { $('showcase').style.display = 'none'; setStatus('drop a file to begin'); setMode(); return; }
     await loadShowcase(new URLSearchParams(location.search).get('ev'));
   })();

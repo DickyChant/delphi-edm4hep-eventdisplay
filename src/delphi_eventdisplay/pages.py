@@ -15,7 +15,7 @@ from pathlib import Path
 def build_index(docs: Path) -> dict:
     events = []
     for js in sorted((docs / "events").glob("*.json")):
-        if js.name == "index.json" or js.name.endswith((".schema.json", ".3d.json")):
+        if js.name == "index.json" or js.name.endswith((".schema.json", ".3d.json", ".flow2d.json", ".flow3d.json")):
             continue  # sidecars of an event, not events of their own
         try:
             fig = json.loads(js.read_text())
@@ -43,6 +43,8 @@ def build_index(docs: Path) -> dict:
                 "bytes": js.stat().st_size,
                 "schema": f"events/{js.stem}.schema.json" if (docs / "events" / f"{js.stem}.schema.json").exists() else None,
                 "figure3d": f"events/{js.stem}.3d.json" if (docs / "events" / f"{js.stem}.3d.json").exists() else None,
+                "figureflow2d": f"events/{js.stem}.flow2d.json" if (docs / "events" / f"{js.stem}.flow2d.json").exists() else None,
+                "figureflow3d": f"events/{js.stem}.flow3d.json" if (docs / "events" / f"{js.stem}.flow3d.json").exists() else None,
             }
         )
     return {"events": events}

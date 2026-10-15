@@ -13,13 +13,13 @@ docs/build.sh                                                     # rebuild the 
 |---|---|
 | `--entry N` | entry number within the file (required) |
 | `--out PATH` | output `.html`; a `.json` and `.schema.json` are written beside it |
-| `--view panels\|3d\|both` | which figure to build; `both` also writes `<stem>.3d.{html,json}` |
+| `--view panels\|3d\|flow2d\|flow3d\|both\|all` | detector panels/scene or Poynting map/sphere; `both` adds the detector scene; `all` writes all four |
 | `--group 'LABEL:COLOUR:i,j,k'` | highlight these tracks, repeatable |
 | `--rich i,j,...` | tracks to show in the RICH panel |
 | `--fit-vertex i,j` | straight-line vertex from those tracks; they start there |
 | `--require-vd` | hide tracks with no VD hits that belong to no vertex and no group |
 | `--max-ip MM` | hide unattached tracks passing further than this from the PV |
-| `--jets` | draw the AABTAG jet axes |
+| `--jets` | draw the AABTAG jet axes in detector views; flow views include jets by default |
 | `--collection ROLE=NAME` | draw ROLE from another collection, repeatable |
 | `--domains FILE` | collection → domain table (default `docs/collection_domains.json`) |
 | `--title` / `--note` | caption for **this** event; stored in metadata, not drawn |
@@ -40,13 +40,18 @@ Each run writes:
 
 Only the JSON is committed; the standalone HTML is gitignored.
 
+`--view both` also writes `event.3d.html` and `event.3d.json`. `--view all` adds
+`event.flow2d.{html,json}` and `event.flow3d.{html,json}` for the energy-flow map
+and sphere. Run `delphi-pages` afterward to advertise available views to the app.
+`--view flow2d` or `--view flow3d` writes just that view to the requested output stem.
+
 ## Worked example
 
 `examples/make_events.sh` holds the exact commands for the talk events. The data one:
 
 ```bash
 delphi-display "$D/data_94c/Y13709.126.edm4hep.root" --entry 3990 \
-  --out docs/events/data_48758_2666.html --view both --require-vd \
+  --out docs/events/data_48758_2666.html --view all --require-vd \
   --title 'Z → bb̄ with a displaced φ → K⁺K⁻' \
   --note 'SVs at 9.66 mm (φ side) and 2.87 mm' \
   --group 'φ → K⁺K⁻ (both kaons RICH-identified):#d62728:20,22' \

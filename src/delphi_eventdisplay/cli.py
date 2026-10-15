@@ -13,8 +13,8 @@ from pathlib import Path
 import numpy as np
 
 from . import geometry as G
-from .figure import build
-from .figure3d import build3d
+from .figure import build, build_flow2d
+from .figure3d import build3d, build_flow3d
 from .read import n_entries, read_event
 from .schema import ROLES, load_domains, read_schema, to_dict
 
@@ -79,9 +79,10 @@ def main(argv=None):
     ap.add_argument("--max-ip", type=float, default=None,
                     help="hide unattached tracks whose r-phi closest approach to the PV exceeds this [mm]")
     ap.add_argument("--jets", action="store_true", help="draw the AABTAG jet axes in panel (a)")
-    ap.add_argument("--view", choices=("panels", "3d", "both"), default="panels",
+    ap.add_argument("--view", choices=("panels", "3d", "flow2d", "flow3d", "both", "all"), default="panels",
                     help="panels: the four-panel figure; 3d: the detector scene; "
-                         "both: write the 3-D figure alongside as <stem>.3d.{html,json}")
+                         "flow2d/flow3d: the Poynting energy-flow map / sphere; "
+                         "both: add <stem>.3d.{html,json}; all: also add .flow2d and .flow3d sidecars")
     ap.add_argument("--collection", action="append", default=[], metavar="ROLE=NAME",
                     help="draw ROLE from collection NAME instead of the default "
                          "(roles: " + ", ".join(ROLES) + "); repeatable")
@@ -181,8 +182,20 @@ def main(argv=None):
         return build3d(e, groups=groups, fit_vertices=fit_vertices, hide=hide, jets=a.jets,
                        title=a.title, note=a.note)
 
+    def build_flow_2d():
+        return build_flow2d(e, groups=groups, hide=hide, title=a.title, note=a.note,
+                            width=a.width, height=a.height)
+
+    def build_flow_3d():
+        return build_flow3d(e, groups=groups, hide=hide, title=a.title, note=a.note,
+                            width=a.width, height=a.height)
+
     if a.view == "3d":
         fig = build_3d()
+    elif a.view == "flow2d":
+        fig = build_flow_2d()
+    elif a.view == "flow3d":
+        fig = build_flow_3d()
     else:
         fig = build(
             e,
@@ -205,13 +218,19 @@ def main(argv=None):
     # the collection panel on the web page reads this beside the figure
     out.with_suffix(".schema.json").write_text(json.dumps(to_dict(e.schema, e.roles), separators=(",", ":")))
 
-    if a.view == "both":
-        f3 = build_3d()
-        h3 = out.with_suffix(".3d.html")
-        _standalone(f3, h3, cdn=a.cdn, meta=dict(f3.layout.meta or {}), title=a.title)
-        j3 = out.with_suffix(".3d.json")
-        j3.write_text(json.dumps(json.loads(f3.to_json()), separators=(",", ":")))
-        print(f"wrote {h3} and {j3} ({j3.stat().st_size / 1e6:.2f} MB)")
+    def sidecar(suffix, builder):
+        side = builder()
+        html = out.with_suffix(suffix + ".html")
+        _standalone(side, html, cdn=a.cdn, meta=dict(side.layout.meta or {}), title=a.title)
+        json_path = out.with_suffix(suffix + ".json")
+        json_path.write_text(json.dumps(json.loads(side.to_json()), separators=(",", ":")))
+        print(f"wrote {html} and {json_path} ({json_path.stat().st_size / 1e6:.2f} MB)")
+
+    if a.view in ("both", "all"):
+        sidecar(".3d", build_3d)
+    if a.view == "all":
+        sidecar(".flow2d", build_flow_2d)
+        sidecar(".flow3d", build_flow_3d)
     print(f"wrote {out} ({out.stat().st_size / 1e6:.1f} MB) and {js} ({js.stat().st_size / 1e6:.2f} MB)")
     return 0
 

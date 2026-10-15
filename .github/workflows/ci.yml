@@ -2,7 +2,7 @@ name: CI
 
 # The browser app installs docs/wheels/*.whl at runtime, so a stale or missing wheel
 # breaks the published site silently. This checks the committed wheel still matches
-# the source, and lints.
+# the source, runs synthetic-event tests, and lints.
 on:
   push:
     branches: [main]
@@ -17,17 +17,26 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
 
       - name: Install
         run: |
           python -m pip install --upgrade pip
-          pip install -e . ruff
+          pip install -e . ruff pytest
 
       - name: Lint
-        run: ruff check src/
+        run: ruff check src/ tests/
+
+      - name: Test synthetic events (no ROOT sample required)
+        run: python -m pytest -q
+
+      - name: Test app state transitions (stubbed browser APIs)
+        run: node tests/test_app.cjs
 
       - name: Import the package
-        run: python -c "import delphi_eventdisplay as d; print(d.__version__, d.build, d.build3d)"
+        run: python -c "import delphi_eventdisplay as d; print(d.__version__, d.build, d.build3d, d.build_flow2d, d.build_flow3d)"
 
       - name: The committed wheel matches the source
         run: |
@@ -39,6 +48,26 @@ jobs:
           test -f "docs/wheels/$NAMED" || { echo "::error::docs/wheels/$NAMED is missing"; exit 1; }
           test "$BUILT" = "$NAMED" || {
             echo "::error::docs/wheels/$NAMED is stale (source builds $BUILT) - run docs/build.sh"; exit 1; }
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from zipfile import ZipFile
+
+          named = json.loads(Path("docs/wheels/index.json").read_text())["wheel"]
+          def payload(path):
+              with ZipFile(path) as wheel:
+                  # Compare actual package code/assets and entry points. ZIP timestamps,
+                  # RECORD hashes and build-tool version metadata are not source changes.
+                  return {name: wheel.read(name) for name in wheel.namelist()
+                          if name.startswith("delphi_eventdisplay/") or name.endswith(".dist-info/entry_points.txt")}
+
+          built = payload(Path("/tmp/wheel") / named)
+          committed = payload(Path("docs/wheels") / named)
+          changed = sorted(name for name in built.keys() | committed.keys() if built.get(name) != committed.get(name))
+          if changed:
+              raise SystemExit("::error::committed wheel is stale; run docs/build.sh. Different files: " + ", ".join(changed))
+          print(f"committed wheel matches all {len(built)} package/entry-point files")
+          PY
 
       - name: The site references only files that exist
         run: |
@@ -48,7 +77,7 @@ jobs:
           docs = pathlib.Path("docs")
           missing = []
           for ev in json.loads((docs/"events"/"index.json").read_text())["events"]:
-              for key in ("file", "schema", "figure3d"):
+              for key in ("file", "schema", "figure3d", "figureflow2d", "figureflow3d"):
                   ref = ev.get(key)
                   if ref and not (docs/ref).exists():
                       missing.append(ref)

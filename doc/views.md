@@ -36,6 +36,34 @@ the vertex region — that ratio is real, and stretching it would be a lie about
     * A hit belonging to no track is drawn as the line parallel to the beam that it actually
       constrains, not as an invented point.
 
+## The energy-flow (Poynting) views
+
+The `Poynting` toggle shows a direction-space energy-flow visualization. It is not a calculation
+of the electromagnetic Poynting vector **E × H**, and the toggle does not perform a Lorentz-frame
+transformation. Objects are placed by their directions, with energy or momentum controlling their
+size, to make jet structure and angular balance easier to inspect without detector geometry.
+
+**2-D flow map** — φ = atan2(dy, dx), from −180° to 180°, against cos θ = dz/|d|. This covers the
+whole 4π solid angle in one rectangle. Charged tracks use momentum directions, EM clusters use
+their directions from the detector origin, and jets use their momentum directions. Marker area
+is proportional to |p| for tracks or energy for clusters and jets, apart from a small visibility
+floor. Jets have larger markers. The thrust axis is shown in both opposite directions.
+
+**3-D direction sphere** — the same objects sit on a translucent unit sphere. Each has an outward
+radial line (an energy *quill*) and an endpoint marker; quill length scales with the square root
+of the normalized energy or |p|, and jets receive an additional length multiplier. The dashed
+thrust axis passes through the sphere. A cubic aspect ratio keeps direction space undistorted;
+the coordinates are dimensionless, not detector lengths.
+
+Both views preserve track highlights, hidden-track choices and collection tagging. Hover gives
+the underlying kinematics and collection selection works as in the detector views. Invalid or
+zero directions and negative/non-finite energies are omitted. Charged tracks and calorimeter
+clusters can describe the same particle: this is an angular visualization, not a calibrated
+particle-flow reconstruction or an independently additive total-energy measurement.
+
+Generate them with `--view flow2d` or `--view flow3d`, or use `--view all` to write both lab and
+both energy-flow views together. `--view both` retains its original meaning: the two lab views.
+
 ## What the interactivity adds
 
 * hover names each track: index, charge, momentum, VD hit count, which vertex it starts from
@@ -43,11 +71,11 @@ the vertex region — that ratio is real, and stretching it would be a lie about
 * zoom replaces the fixed inset in panel (c)
 * selecting a collection dims everything that did not come from it
 
-## Both views carry
+## All views carry
 
 The DELPHI + EDM4hep mark, embedded as a data URI so it survives PNG/SVG export and an offline
 HTML file, anchored top-right — the subplot titles are left-aligned over their own panel, so a
 top-left mark lands on "(a) r-φ view".
 
-No title and no run/event line are drawn into either figure: every number lives in `layout.meta`
+No title and no run/event line are drawn into the figures: every number lives in `layout.meta`
 and the page renders it as live text.

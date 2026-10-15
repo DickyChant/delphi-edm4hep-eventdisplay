@@ -14,7 +14,27 @@
    "note": "SVs at 9.66 mm (\u03c6 side) and 2.87 mm",
    "bytes": 495641,
    "schema": "events/data_48758_2666.schema.json",
-   "figure3d": "events/data_48758_2666.3d.json"
+   "figure3d": "events/data_48758_2666.3d.json",
+   "figureflow2d": null,
+   "figureflow3d": null
+  },
+  {
+   "key": "synthetic_flow_demo",
+   "file": "events/synthetic_flow_demo.json",
+   "title": "Synthetic two-jet energy-flow demo",
+   "run": null,
+   "event": null,
+   "source": "synthetic in-memory example (no ROOT input)",
+   "entry": 0,
+   "n_charged": 6,
+   "n_neutral": 4,
+   "btag": null,
+   "note": "SYNTHETIC: hand-built, balanced two-jet illustration; not DELPHI detector data or a physics simulation. Six charged tracks, four neutral EM showers; no VD hits, displaced vertices, or RICH measurements. Jet weights include the particles and showers; do not sum the displayed weights.",
+   "bytes": 333416,
+   "schema": "events/synthetic_flow_demo.schema.json",
+   "figure3d": "events/synthetic_flow_demo.3d.json",
+   "figureflow2d": "events/synthetic_flow_demo.flow2d.json",
+   "figureflow3d": "events/synthetic_flow_demo.flow3d.json"
   }
  ]
 }

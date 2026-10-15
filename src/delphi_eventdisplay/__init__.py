@@ -7,9 +7,9 @@
 The command line does the same: `delphi-display FILE --entry N --out event.html`.
 """
 
-from .figure import build
-from .figure3d import build3d
+from .figure import build, build_flow2d
+from .figure3d import build3d, build_flow3d
 from .read import Event, n_entries, read_event
 
 __version__ = "0.1.0"
-__all__ = ["Event", "build", "build3d", "n_entries", "read_event"]
+__all__ = ["Event", "build", "build3d", "build_flow2d", "build_flow3d", "n_entries", "read_event"]
