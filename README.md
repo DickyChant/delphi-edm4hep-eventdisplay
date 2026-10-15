@@ -14,7 +14,7 @@ edm4hep file on it to step through that file's events instead — read in the br
 under Pyodide, so nothing is uploaded. Beside the figure is every collection in the event with its
 type, domain, provenance, links and per-event counts; selecting one dims everything in the figure
 that did not come from it, and clicking a track selects its collection. Switch between the four
-panels and a 3-D detector scene, or choose **Poynting** for a 2-D angular energy-flow map or a
+panels and a 3-D detector scene, or choose **Poynting** for a 2-D projected energy-flow sphere or a
 3-D direction sphere. Save any available view as PNG, SVG or figure JSON.
 
 ## Install and run
@@ -94,7 +94,7 @@ vertex it starts from), a legend that switches whole classes of object off, and 
 
 The browser's dimension (`panels` / `3D`) and frame (`lab` / `Poynting`) toggles offer four views.
 Poynting displays charged-track momentum directions, EM-cluster directions from the detector
-origin, jets and the thrust axis on a φ–cos θ map or a draggable unit sphere. In 2-D, marker area
+origin, jets and the thrust axis on a fixed 2-D sphere projection or a draggable 3-D unit sphere. In 2-D, marker area
 scales with energy (clusters/jets) or |p| (tracks), above a small visibility floor; the sphere adds
 radial quills whose lengths scale with the square root of the same weight. Collection selection and track highlighting work in these views too.
 
@@ -124,7 +124,7 @@ run and event, with `_3d`, `_poynt` or `_3d_poynt` identifying the selected view
 |---|---|
 | `src/delphi_eventdisplay/read.py` | edm4hep → an `Event`: the collection names and every decoding rule |
 | `src/delphi_eventdisplay/geometry.py` | helices, the curvature-sign check, where each track starts, the self-checks |
-| `src/delphi_eventdisplay/figure.py` | the four panels and the 2-D flow map → `go.Figure` |
+| `src/delphi_eventdisplay/figure.py` | the four panels and the 2-D projected sphere → `go.Figure` |
 | `src/delphi_eventdisplay/figure3d.py` | the detector scene and the direction sphere → `go.Figure` |
 | `src/delphi_eventdisplay/cli.py` | `delphi-display` |
 | `src/delphi_eventdisplay/pages.py` | `delphi-pages`, rebuilds the site manifest |

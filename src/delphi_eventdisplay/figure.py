@@ -16,7 +16,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 from . import geometry as G
-from ._flow import angles, objects, unit_direction
+from ._flow import objects, unit_direction
 from ._logo import LOGO_DATA_URI
 from .read import Event
 
@@ -393,68 +393,132 @@ def build_flow2d(
     width: int = 1100,
     height: int = 1000,
 ) -> go.Figure:
-    """Poynting-style energy-flow map in (φ, cos θ), covering the full solid angle.
+    """Orthographic projection of measured directions onto a unit celestial sphere.
 
-Marker area scales with |p| for charged tracks and E for clusters/jets, with a
-4-pixel diameter floor for visibility. Jets use a larger marker scale. This is
-a direction-space display, not a calculation of the electromagnetic Poynting
-vector, and tracks/clusters/jets are not summed as independent energy deposits.
-"""
+    The fixed viewpoint is azimuth 45 degrees from +x toward +y and elevation
+    30 degrees above the xy plane. Screen-right is (-1, 1, 0)/sqrt(2), screen-up
+    is (-1/(2*sqrt(2)), -1/(2*sqrt(2)), sqrt(3)/2), and positive depth points
+    toward the viewer. Rear directions have dashed, faded rays; both hemispheres
+    remain visible. Rays join the origin to the projected *unit* direction, so
+    their screen lengths encode orientation/foreshortening, not energy.
+
+    Endpoint marker area scales with |p| for tracks and E for clusters/jets,
+    with a 4-pixel diameter floor. Jets use a larger marker scale. This is a
+    direction-space display, not a calculation of the electromagnetic Poynting
+    vector, and tracks/clusters/jets are not summed as independent deposits.
+    """
     groups, hide = groups or {}, hide or {}
     roles = getattr(e, "roles", {}) or {}
     drawn, reference = objects(e, hide, jets)
     fig = go.Figure()
-    batches = {}
+    right = np.array([-1.0, 1.0, 0.0]) / np.sqrt(2.0)
+    up = np.array([-1.0 / np.sqrt(8.0), -1.0 / np.sqrt(8.0), np.sqrt(3.0) / 2.0])
+    toward_eye = np.array([np.sqrt(3.0 / 8.0), np.sqrt(3.0 / 8.0), 0.5])
 
-    # Batch markers by role/group, while keeping each object's index in hover text.
-    for obj in sorted(drawn, key=lambda obj: obj.role == "tracks" and obj.index in groups):
+    def project(direction):
+        return float(direction @ right), float(direction @ up), float(direction @ toward_eye)
+
+    # Every coordinate is a plain list, including guides, for Plotly.js 2.x.
+    # The circle is the sphere's silhouette, not an equator in detector space.
+    angle = np.linspace(0.0, 2.0 * np.pi, 361)
+    fig.add_trace(go.Scatter(
+        x=np.cos(angle).tolist(), y=np.sin(angle).tolist(), mode="lines",
+        line=dict(color="#b8c2cb", width=1.2), fill="toself", fillcolor="rgba(200,210,218,0.06)",
+        name="unit sphere", legendgroup="sphere", showlegend=False, hoverinfo="skip",
+        meta={"role": "", "collection": "", "component": "silhouette"},
+    ))
+    # z=0 projects to an ellipse. Its front half has cos(phi-45 degrees)>=0.
+    for front, start in ((False, 3.0 * np.pi / 4.0), (True, -np.pi / 4.0)):
+        phi = np.linspace(start, start + np.pi, 181)
+        equator = np.column_stack((np.cos(phi), np.sin(phi), np.zeros_like(phi)))
+        fig.add_trace(go.Scatter(
+            x=(equator @ right).tolist(), y=(equator @ up).tolist(), mode="lines",
+            line=dict(color="#c4ccd3", width=1.0, dash="solid" if front else "dash"),
+            opacity=0.85 if front else 0.65,
+            name="equator (z = 0)", legendgroup="sphere", showlegend=False, hoverinfo="skip",
+            meta={"role": "", "collection": "", "component": "equator",
+                  "hemisphere": "front" if front else "rear"},
+        ))
+
+    seen = set()
+    # Rear hemisphere first; within each hemisphere, draw emphasized objects last.
+    order = sorted(drawn, key=lambda obj: (
+        project(obj.direction)[2] >= 0.0,
+        obj.role == "jets" or (obj.role == "tracks" and obj.index in groups),
+    ))
+    for obj in order:
         if obj.role == "tracks":
-            label, color = groups.get(obj.index, ("charged tracks", GREY))
+            label, color = groups.get(obj.index, ("charged tracks (area ∝ |p|)", GREY))
             group = f"g:{label}" if obj.index in groups else "trkother"
             symbol, maximum = "circle", 22.0
+            line_width = 2.0 if obj.index in groups else 1.1
         elif obj.role == "em_clusters":
             label, color, group, symbol, maximum = "EM clusters (area ∝ E)", SHOWER, "em", "diamond", 22.0
+            line_width = 1.4
         else:
-            label, color, group, symbol, maximum = "jets (area ∝ E)", JETC, "jet", "square", 40.0
-        key = (obj.role, label, color, group, symbol)
-        batch = batches.setdefault(key, dict(x=[], y=[], size=[], hover=[]))
-        phi, cth, _theta = angles(obj.direction)
-        batch["x"].append(phi)
-        batch["y"].append(cth)
-        batch["size"].append(max(4.0, maximum * np.sqrt(obj.magnitude / reference)))
-        batch["hover"].append(obj.hover)
-    for (role, label, color, group, symbol), batch in batches.items():
+            label, color, group, symbol, maximum = "jets (area ∝ E; enlarged)", JETC, "jet", "square", 40.0
+            line_width = 3.0
+        x, y, depth = project(obj.direction)
+        front = depth >= 0.0
+        hemisphere = "front" if front else "rear"
+        size = max(4.0, maximum * np.sqrt(obj.magnitude / reference))
+        hover = f"{obj.hover}<br>{hemisphere} hemisphere"
         fig.add_trace(go.Scatter(
-            x=batch["x"], y=batch["y"], mode="markers",
-            marker=dict(size=batch["size"], sizemode="diameter", symbol=symbol, color=color,
+            x=[0.0, x], y=[0.0, y], mode="lines+markers",
+            line=dict(color=color, width=line_width, dash="solid" if front else "dash"),
+            marker=dict(size=[0.0, size], sizemode="diameter", symbol=symbol, color=color,
                         line=dict(color="black", width=0.6)),
-            name=label, legendgroup=group, showlegend=True,
-            hovertemplate="%{text}<extra></extra>", text=batch["hover"],
-            meta={"role": role, "collection": roles.get(role, "")},
+            opacity=0.9 if front else 0.42,
+            name=label, legendgroup=group, showlegend=group not in seen,
+            hovertemplate="%{text}<extra></extra>", text=[hover, hover],
+            meta={"role": obj.role, "collection": roles.get(obj.role, ""),
+                  "object_index": obj.index, "depth": depth, "hemisphere": hemisphere},
         ))
+        seen.add(group)
 
     thrust = unit_direction(e.thrust)
     if thrust is not None:
         for sign, tag in ((1.0, "+"), (-1.0, "−")):
-            phi, cth, _theta = angles(sign * thrust)
+            x, y, depth = project(sign * thrust)
+            front = depth >= 0.0
+            hemisphere = "front" if front else "rear"
             fig.add_trace(go.Scatter(
-                x=[phi], y=[cth], mode="markers",
-                marker=dict(symbol="star", size=17, color=PVC, line=dict(color="black", width=1)),
-                name="thrust axis", legendgroup="thrust", showlegend=sign > 0,
-                hovertemplate=f"thrust axis ({tag})<extra></extra>",
-                meta={"role": "", "collection": ""},
+                x=[0.0, x], y=[0.0, y], mode="lines+markers",
+                line=dict(color=PVC, width=2.5, dash="solid" if front else "dash"),
+                marker=dict(symbol="star", size=[0.0, 17.0], color=PVC,
+                            line=dict(color="black", width=0.7)),
+                opacity=0.9 if front else 0.48,
+                name="thrust axis (±)", legendgroup="thrust", showlegend=sign > 0,
+                hovertemplate=f"thrust axis ({tag})<br>{hemisphere} hemisphere<extra></extra>",
+                meta={"role": "", "collection": "", "component": "thrust",
+                      "depth": depth, "hemisphere": hemisphere, "sign": sign},
             ))
 
+    annotations = [dict(
+        text="Orthographic sphere · view az 45°, el 30° · z = beam"
+             "<br>Solid: front · dashed/faded: rear · marker area ∝ |p| / E; jets enlarged; 4 px floor",
+        x=0.0, y=1.025, xref="paper", yref="paper", xanchor="left", yanchor="bottom",
+        showarrow=False, align="left", font=dict(size=11, color="#68737d"),
+    )]
+    for label, direction in zip(("+x", "+y", "+z"), np.eye(3)):
+        x, y, _depth = project(direction)
+        annotations.append(dict(
+            text=label, x=1.09 * x, y=1.09 * y, xref="x", yref="y",
+            showarrow=False, font=dict(size=11, color="#8b959e"),
+        ))
     fig.update_layout(
         meta=dict(run=e.run, event=e.event, entry=e.entry, source=e.path.split("/")[-1],
                   n_charged=e.n_charged, n_neutral=e.n_neutral, b_field=e.b_field,
                   btag=e.btag_event, title=title, note=note, view="flow2d"),
         template=_template(), showlegend=True, width=width, height=height,
-        images=[logo_image(size=0.07)],
-        legend=dict(orientation="h", yanchor="top", y=-0.08, xanchor="center", x=0.5, font=dict(size=12)),
-        margin=dict(l=70, r=30, t=70, b=110), hovermode="closest",
+        images=[logo_image(size=0.07)], annotations=annotations,
+        legend=dict(orientation="h", yanchor="top", y=-0.04, xanchor="center", x=0.5, font=dict(size=12)),
+        margin=dict(l=35, r=35, t=90, b=100), hovermode="closest",
         hoverlabel=dict(bgcolor="white", font_size=12), plot_bgcolor="white", paper_bgcolor="white",
     )
-    fig.update_xaxes(title_text="φ [deg]", range=[-180, 180], dtick=90)
-    fig.update_yaxes(title_text="cos θ", range=[-1.05, 1.05])
+    axes = dict(visible=False, title_text="", range=[-1.16, 1.16],
+                showgrid=False, zeroline=False, showline=False, showticklabels=False,
+                ticks="", constrain="domain")
+    fig.update_xaxes(**axes)
+    fig.update_yaxes(**axes, scaleanchor="x", scaleratio=1.0)
     return fig

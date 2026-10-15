@@ -240,7 +240,9 @@ def build_flow3d(
 
     Magnitude means E for clusters/jets and |p| for charged tracks, in GeV.
     All objects share one per-event normalization; jets are emphasized by a factor
-    of 1.3. Equal axis ranges preserve the spherical geometry while rotating it.
+    of 1.3. Equal, hidden axis ranges preserve the spherical geometry while rotating
+    it. Positive-axis labels belong to the scene, so they rotate with the sphere;
+    the small key above it is a colour key, not a fixed-screen orientation triad.
     """
     groups, hide = groups or {}, hide or {}
     roles = getattr(e, "roles", {}) or {}
@@ -301,6 +303,20 @@ def build_flow3d(
         meta={"role": "", "collection": ""},
     ))
 
+    hidden_axis = dict(visible=False, showbackground=False, showgrid=False,
+                       zeroline=False, showline=False, showticklabels=False,
+                       ticks="", title_text="", range=[-2.3, 2.3])
+    axis_colours = ("#b44b4b", "#38805c", "#3d6eac")
+    axis_labels = [
+        dict(x=float(x), y=float(y), z=float(z), text="+" + axis,
+             showarrow=False, font=dict(size=11, color=colour))
+        for axis, colour, (x, y, z) in zip("xyz", axis_colours, 1.08 * np.eye(3))
+    ]
+    axis_key = "axis key: " + " &nbsp; ".join(
+        f'<span style="color:{colour}">{axis}</span>'
+        for axis, colour in zip("xyz", axis_colours)
+    ) + " (z = beam)"
+
     fig.update_layout(
         meta=dict(run=e.run, event=e.event, entry=e.entry, source=e.path.split("/")[-1],
                   n_charged=e.n_charged, n_neutral=e.n_neutral, b_field=e.b_field,
@@ -308,12 +324,13 @@ def build_flow3d(
         template=_template3d(), showlegend=True, width=width, height=height, font=dict(size=12),
         images=[logo_image(x=0.995, size=0.085)],
         legend=dict(orientation="h", yanchor="top", y=-0.02, xanchor="center", x=0.5, font=dict(size=12)),
+        annotations=[dict(text=axis_key, xref="paper", yref="paper", x=0.02, y=1.04,
+                          xanchor="left", yanchor="bottom", showarrow=False,
+                          font=dict(size=11, color="#5c636e"))],
         margin=dict(l=0, r=0, t=66, b=60),
         scene=dict(
-            aspectmode="cube",
-            xaxis=dict(**AXIS, title_text="x", range=[-2.3, 2.3]),
-            yaxis=dict(**AXIS, title_text="y", range=[-2.3, 2.3]),
-            zaxis=dict(**AXIS, title_text="z (beam)", range=[-2.3, 2.3]),
+            aspectmode="cube", bgcolor="white", annotations=axis_labels,
+            xaxis=hidden_axis, yaxis=hidden_axis, zaxis=hidden_axis,
             camera=dict(eye=dict(x=1.45, y=1.05, z=0.85)),
         ), paper_bgcolor="white",
     )

@@ -81,7 +81,7 @@ def main(argv=None):
     ap.add_argument("--jets", action="store_true", help="draw the AABTAG jet axes in panel (a)")
     ap.add_argument("--view", choices=("panels", "3d", "flow2d", "flow3d", "both", "all"), default="panels",
                     help="panels: the four-panel figure; 3d: the detector scene; "
-                         "flow2d/flow3d: the Poynting energy-flow map / sphere; "
+                         "flow2d/flow3d: the Poynting projected sphere / 3-D sphere; "
                          "both: add <stem>.3d.{html,json}; all: also add .flow2d and .flow3d sidecars")
     ap.add_argument("--collection", action="append", default=[], metavar="ROLE=NAME",
                     help="draw ROLE from collection NAME instead of the default "

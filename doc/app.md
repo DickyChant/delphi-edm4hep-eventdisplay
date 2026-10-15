@@ -37,7 +37,7 @@ The wiring is `meta.collection` on every trace, set by `figure.build`.
 
 Two toggles choose a **dimension** (`panels` / `3D`) and a **frame** (`lab` / `Poynting`).
 The lab views show detector positions: the original four panels or the 3-D detector scene.
-Poynting shows directions: a φ–cos θ map or a draggable direction sphere. See the
+Poynting shows directions: a fixed 2-D sphere projection or a draggable 3-D direction sphere. See the
 [energy-flow views](views.md#the-energy-flow-poynting-views).
 
 Live mode builds all four views from the same entry and collection choices, so switching does

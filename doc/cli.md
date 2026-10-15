@@ -13,7 +13,7 @@ docs/build.sh                                                     # rebuild the 
 |---|---|
 | `--entry N` | entry number within the file (required) |
 | `--out PATH` | output `.html`; a `.json` and `.schema.json` are written beside it |
-| `--view panels\|3d\|flow2d\|flow3d\|both\|all` | detector panels/scene or Poynting map/sphere; `both` adds the detector scene; `all` writes all four |
+| `--view panels\|3d\|flow2d\|flow3d\|both\|all` | detector panels/scene or Poynting projected sphere/3-D sphere; `both` adds the detector scene; `all` writes all four |
 | `--group 'LABEL:COLOUR:i,j,k'` | highlight these tracks, repeatable |
 | `--rich i,j,...` | tracks to show in the RICH panel |
 | `--fit-vertex i,j` | straight-line vertex from those tracks; they start there |
@@ -41,8 +41,8 @@ Each run writes:
 Only the JSON is committed; the standalone HTML is gitignored.
 
 `--view both` also writes `event.3d.html` and `event.3d.json`. `--view all` adds
-`event.flow2d.{html,json}` and `event.flow3d.{html,json}` for the energy-flow map
-and sphere. Run `delphi-pages` afterward to advertise available views to the app.
+`event.flow2d.{html,json}` and `event.flow3d.{html,json}` for the projected energy-flow sphere
+and draggable 3-D sphere. Run `delphi-pages` afterward to advertise available views to the app.
 `--view flow2d` or `--view flow3d` writes just that view to the requested output stem.
 
 ## Worked example

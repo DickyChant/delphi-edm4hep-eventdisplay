@@ -43,17 +43,24 @@ of the electromagnetic Poynting vector **E × H**, and the toggle does not perfo
 transformation. Objects are placed by their directions, with energy or momentum controlling their
 size, to make jet structure and angular balance easier to inspect without detector geometry.
 
-**2-D flow map** — φ = atan2(dy, dx), from −180° to 180°, against cos θ = dz/|d|. This covers the
-whole 4π solid angle in one rectangle. Charged tracks use momentum directions, EM clusters use
-their directions from the detector origin, and jets use their momentum directions. Marker area
-is proportional to |p| for tracks or energy for clusters and jets, apart from a small visibility
-floor. Jets have larger markers. The thrust axis is shown in both opposite directions.
+**2-D projected sphere** — a fixed orthographic view of the same unit direction sphere,
+seen from azimuth 45° and elevation 30° in the +x/+y/+z octant. A circular silhouette and
+projected equator establish the sphere. The rear equator and far-hemisphere rays are dashed;
+front rays are solid. Directions on opposite sides can overlap in projection: this is not a
+one-to-one angular map. Ray length represents projected direction, **not energy**. Endpoint
+marker area is proportional to |p| for tracks or energy for clusters and jets, apart from the
+small visibility floor; jets have larger markers. The thrust direction and its opposite are
+shown. Charged tracks use momentum directions, EM clusters use their positions relative to
+the detector origin, and jets use their momentum directions. Hover retains φ, θ and the
+underlying weight, so projection does not substitute a different physical quantity.
 
 **3-D direction sphere** — the same objects sit on a translucent unit sphere. Each has an outward
 radial line (an energy *quill*) and an endpoint marker; quill length scales with the square root
 of the normalized energy or |p|, and jets receive an additional length multiplier. The dashed
 thrust axis passes through the sphere. A cubic aspect ratio keeps direction space undistorted;
-the coordinates are dimensionless, not detector lengths.
+the coordinates are dimensionless, not detector lengths. The white scene has no Cartesian box,
+background planes, grid or tick labels. Small +x/+y/+z labels sit on the sphere's positive axes
+and rotate with it; a compact colour key at the top identifies them (z is the beam direction).
 
 Both views preserve track highlights, hidden-track choices and collection tagging. Hover gives
 the underlying kinematics and collection selection works as in the detector views. Invalid or

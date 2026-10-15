@@ -46,11 +46,12 @@ def test_public_builders():
 @pytest.mark.parametrize("builder", BUILDERS)
 def test_metadata_and_collection_roles(event, builder):
     fig = builder(event, title="Synthetic event", note="No ROOT sample", width=720, height=640)
-    assert fig.layout.meta == {
+    expected_meta = {
         "run": 42, "event": 17, "entry": 1, "source": "axis-event.edm4hep.root",
         "n_charged": 6, "n_neutral": 2, "b_field": 1.2, "btag": 3.4,
         "title": "Synthetic event", "note": "No ROOT sample", "view": builder.__name__.removeprefix("build_"),
     }
+    assert {key: fig.layout.meta[key] for key in expected_meta} == expected_meta
     assert (fig.layout.width, fig.layout.height) == (720, 640)
     assert fig.layout.showlegend is True
     for trace in fig.data:
@@ -61,51 +62,21 @@ def test_metadata_and_collection_roles(event, builder):
         assert by_role(fig, role)
 
 
-def test_flow2d_axis_directions_and_thrust(event):
-    fig = build_flow2d(event)
-    tracks, = by_role(fig, "tracks")
-    np.testing.assert_allclose(tracks.x, [0.0, 90.0, 0.0, 180.0, -90.0, 0.0], atol=1e-12)
-    np.testing.assert_allclose(tracks.y, [0.0, 0.0, 1.0, 0.0, 0.0, -1.0], atol=1e-12)
-    em, = by_role(fig, "em_clusters")
-    np.testing.assert_allclose(em.x, [90.0, 0.0])
-    np.testing.assert_allclose(em.y, [0.0, -1.0])
-    jets, = by_role(fig, "jets")
-    np.testing.assert_allclose(jets.x, [45.0])
-    np.testing.assert_allclose(jets.y, [0.0])
-    thrust = [t for t in fig.data if t.legendgroup == "thrust"]
-    np.testing.assert_allclose([t.x[0] for t in thrust], [np.degrees(np.arctan2(2, 1)), np.degrees(np.arctan2(-2, -1))])
-    np.testing.assert_allclose([t.y[0] for t in thrust], [2 / 3, -2 / 3])
-    assert sum(bool(t.showlegend) for t in thrust) == 1
-    assert tuple(fig.layout.xaxis.range) == (-180, 180)
-    assert fig.layout.yaxis.range[0] <= -1 and fig.layout.yaxis.range[1] >= 1
-    assert "φ" in fig.layout.xaxis.title.text and "cos θ" in fig.layout.yaxis.title.text
-
-
-def test_flow2d_azimuth_seam_keeps_both_sides(event):
-    epsilon = 1e-9
-    event.momentum[0] = [-1.0, epsilon, 0.0]
-    event.momentum[1] = [-1.0, -epsilon, 0.0]
-    tracks, = by_role(build_flow2d(event), "tracks")
-    delta = np.degrees(np.arctan(epsilon))
-    np.testing.assert_allclose(tracks.x[:2], [180 - delta, -180 + delta], atol=1e-12, rtol=0)
-    assert 0 < tracks.x[0] < 180 and -180 < tracks.x[1] < 0
-    np.testing.assert_allclose(tracks.y[:2], [0.0, 0.0])
-
-
 def test_flow2d_marker_area_and_minimum_size(event):
     # A common reference includes the 16 GeV jet, so areas can be compared
     # across tracks and clusters. Jets deliberately have a larger scale.
     event.p_abs[5] = 1e-6
     fig = build_flow2d(event)
-    tracks, = by_role(fig, "tracks")
-    em, = by_role(fig, "em_clusters")
-    jets, = by_role(fig, "jets")
-    np.testing.assert_allclose(tracks.marker.size, np.maximum(4, 22 * np.sqrt(event.p_abs / 16)))
-    np.testing.assert_allclose(em.marker.size, [11.0, 5.5])
-    np.testing.assert_allclose(jets.marker.size, [40.0])
-    assert tracks.marker.size[0] ** 2 / tracks.marker.size[1] ** 2 == pytest.approx(4.0)
-    assert tracks.marker.size[-1] == 4.0
-    for trace in (tracks, em, jets):
+    tracks = sorted(by_role(fig, "tracks"), key=lambda t: t.meta["object_index"])
+    em = sorted(by_role(fig, "em_clusters"), key=lambda t: t.meta["object_index"])
+    jets = by_role(fig, "jets")
+    sizes = [trace.marker.size[-1] for trace in tracks]
+    np.testing.assert_allclose(sizes, np.maximum(4, 22 * np.sqrt(event.p_abs / 16)))
+    np.testing.assert_allclose([t.marker.size[-1] for t in em], [11.0, 5.5])
+    np.testing.assert_allclose([t.marker.size[-1] for t in jets], [40.0])
+    assert sizes[0] ** 2 / sizes[1] ** 2 == pytest.approx(4.0)
+    assert sizes[-1] == 4.0
+    for trace in tracks + em + jets:
         assert trace.marker.sizemode in (None, "diameter")
 
 
@@ -140,6 +111,24 @@ def test_flow3d_unit_sphere_quills_and_equal_ranges(event):
     assert_finite_coordinates(fig)
 
 
+def test_flow3d_clean_scene_and_camera_consistent_axis_labels(event):
+    fig = build_flow3d(event)
+    scene = fig.layout.scene
+    assert scene.bgcolor == "white"
+    for axis in (scene.xaxis, scene.yaxis, scene.zaxis):
+        assert axis.visible is False
+        assert axis.showbackground is axis.showgrid is axis.zeroline is False
+        assert axis.showline is axis.showticklabels is False
+        assert axis.ticks == "" and axis.title.text == ""
+    # Scene-space annotations are projected by the same camera as the sphere.
+    assert [label.text for label in scene.annotations] == ["+x", "+y", "+z"]
+    np.testing.assert_allclose([[a.x, a.y, a.z] for a in scene.annotations], 1.08 * np.eye(3))
+    assert all(label.showarrow is False for label in scene.annotations)
+    key, = fig.layout.annotations
+    assert key.xref == key.yref == "paper" and key.y > 1
+    assert "axis key:" in key.text and "z = beam" in key.text
+
+
 @pytest.mark.parametrize("builder", BUILDERS)
 def test_groups_hide_and_disabled_jets(event, builder):
     fig = builder(event, groups={0: ("highlighted pair", "#ff0000"), 1: ("highlighted pair", "#ff0000")},
@@ -158,9 +147,9 @@ def test_groups_hide_and_disabled_jets(event, builder):
 def test_hidden_objects_and_disabled_jets_do_not_set_scale(event):
     event.p_abs[0] = 1000.0
     fig = build_flow2d(event, hide={0: True}, jets=False)
-    em, = by_role(fig, "em_clusters")
+    em = sorted(by_role(fig, "em_clusters"), key=lambda t: t.meta["object_index"])
     # Remaining maximum is the 4 GeV EM cluster.
-    np.testing.assert_allclose(em.marker.size, [22.0, 11.0])
+    np.testing.assert_allclose([t.marker.size[-1] for t in em], [22.0, 11.0])
     fig3d = build_flow3d(event, hide={0: True}, jets=False)
     em3d = by_role(fig3d, "em_clusters")[0]
     points = points3d(em3d)
@@ -184,7 +173,7 @@ def test_invalid_directions_are_omitted_and_do_not_set_scale(event, builder, dir
     assert by_role(fig, "tracks") and by_role(fig, "em_clusters")
     if builder is build_flow2d:
         em, = by_role(fig, "em_clusters")
-        np.testing.assert_allclose(em.marker.size, [22 / np.sqrt(3)])
+        assert em.marker.size[-1] == pytest.approx(22 / np.sqrt(3))
     else:
         em, = by_role(fig, "em_clusters")
         points = points3d(em)
@@ -237,7 +226,7 @@ def test_zero_magnitudes_have_finite_visible_markers(event, builder):
         assert by_role(fig, role)
         for trace in by_role(fig, role):
             if builder is build_flow2d:
-                np.testing.assert_allclose(trace.marker.size, 4.0)
+                assert trace.marker.size[-1] == 4.0
             else:
                 points = points3d(trace)
                 np.testing.assert_allclose(points[0], points[1])
